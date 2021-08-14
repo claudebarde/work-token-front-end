@@ -75,15 +75,12 @@
       name: "WORK Token",
       preferredNetwork: NetworkType.GRANADANET
     });
+    const storage: any = await contract.storage();
     const activeAccount = await wallet.client.getActiveAccount();
     if (activeAccount) {
       userAddress = activeAccount.address;
       Tezos.setWalletProvider(wallet);
       // finds if user has balance
-      const storage: any = await contract.storage();
-      tokensReward = storage.tokens_reward;
-      rewardHalvingBlockInterval = storage.reward_halving.block_interval;
-      currentDifficulty = storage.difficulty;
       const balance = await storage.ledger.get(userAddress);
       if (balance) {
         userBalance = balance.toNumber();
@@ -91,6 +88,9 @@
         userBalance = 0;
       }
     }
+    tokensReward = storage.tokens_reward;
+    rewardHalvingBlockInterval = storage.reward_halving.block_interval;
+    currentDifficulty = storage.difficulty;
   });
 </script>
 
