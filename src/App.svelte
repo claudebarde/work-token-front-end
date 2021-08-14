@@ -166,7 +166,7 @@
   }
 
   .connect-wallet {
-    position: absolute;
+    position: fixed;
     top: 15px;
     right: 15px;
     display: flex;
@@ -174,6 +174,10 @@
     align-items: center;
     font-size: 20px;
     color: $tezos-blue;
+
+    a {
+      color: inherit;
+    }
   }
 </style>
 
@@ -193,6 +197,22 @@
         &nbsp;
         {userAddress.slice(0, 5)}...{userAddress.slice(-5)}
       </button>
+      &nbsp;&nbsp;&nbsp;
+      <a
+        href="https://better-call.dev/granadanet/KT1BqD75Xv4DJDX9rJ1qQD6KM4gXGWiRnDAc/operations"
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+      >
+        <span class="material-icons"> link </span>
+      </a>
+      &nbsp;&nbsp;&nbsp;
+      <a
+        href="https://github.com/claudebarde/work-token-front-end"
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+      >
+        <span class="material-icons"> source </span>
+      </a>
     {:else}
       <button on:click={connect}>Connect wallet</button>
     {/if}
