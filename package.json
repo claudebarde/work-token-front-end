@@ -41,6 +41,8 @@
     "@taquito/beacon-wallet": "^10.1.0",
     "@taquito/michel-codec": "^10.1.0",
     "@taquito/taquito": "^10.1.0",
-    "file-loader": "^6.2.0"
+    "file-loader": "^6.2.0",
+    "random-seed": "^0.3.0",
+    "worker-loader": "^3.0.8"
   }
 }

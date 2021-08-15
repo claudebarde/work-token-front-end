@@ -4,10 +4,10 @@
   import { BeaconWallet } from "@taquito/beacon-wallet";
   import { NetworkType } from "@airgap/beacon-sdk";
   import { HubConnectionBuilder, HubConnection } from "@microsoft/signalr";
-  import createHash from "./makeAndCheckHash";
   import type { Difficulty } from "./types";
   import KneadingIcon from "./KneadingIcon.svelte";
   import Modal from "./Modal.svelte";
+  import KneaderWorker from "worker-loader!./kneader.worker.ts";
 
   let Tezos: TezosToolkit;
   let wallet: BeaconWallet;
@@ -22,11 +22,14 @@
   let tokensReward = 0;
   let rewardHalvingBlockInterval = 0;
   let currentDifficulty: Difficulty;
+  let kneader;
   let kneading = false;
   let openModal = false;
   let dataToSubmit: { hash: string; nonce: number; level: number } = undefined;
-  let hashingCountdown = 0;
+  let hashingCountdownInterval;
+  let hashingCountdown = 240;
   let kneadingError = false;
+  let autoReknead = false;
 
   const rpcUrl = "https://api.tez.ie/rpc/granadanet"; //"https://granadanet.smartpy.io"
 
@@ -59,9 +62,9 @@
       userAddress = await wallet.getPKH();
 
       const storage: any = await contract.storage();
-      const kneader = await storage.kneaders.get(userAddress);
-      if (kneader) {
-        lastKneading = kneader.last_kneading_level.toNumber();
+      const kneaderAccount = await storage.kneaders.get(userAddress);
+      if (kneaderAccount) {
+        lastKneading = kneaderAccount.last_kneading_level.toNumber();
       }
     } catch (err) {
       console.error(err);
@@ -73,32 +76,56 @@
     userAddress = "";
   };
 
+  const handleKneader = async msg => {
+    console.log("message from kneader:", msg.data);
+    const { data } = msg;
+    if (data.type === "hash-found") {
+      kneading = false;
+      hashingCountdown = 240;
+      clearInterval(hashingCountdownInterval);
+      if (data.success) {
+        dataToSubmit = { ...data };
+        openModal = true;
+      } else {
+        // refreshes difficulty
+        const storage: any = await contract.storage();
+        currentDifficulty = {
+          ...storage.difficulty,
+          length: storage.difficulty.length.toNumber()
+        };
+
+        if (autoReknead) {
+          await knead();
+        } else {
+          kneadingError = true;
+          setTimeout(() => (kneadingError = false), 3000);
+        }
+      }
+    }
+  };
+
   const knead = async () => {
     kneading = true;
     // checks if user has the right to knead again
     const storage: any = await contract.storage();
-    const kneader = await storage.kneaders.get(userAddress);
-    if (kneader) {
-      const lastKneading = kneader.last_kneading_level.toNumber();
+    const kneaderAccount = await storage.kneaders.get(userAddress);
+    if (kneaderAccount) {
+      const lastKneading = kneaderAccount.last_kneading_level.toNumber();
       if (currentLevel < lastKneading + rekneadingAuthLevel) {
         console.log("not allowed to knead now");
         kneading = false;
         return;
       }
     }
+    hashingCountdownInterval = setInterval(() => (hashingCountdown -= 1), 1000);
 
-    const nonce = Math.round(Math.random() * (1_000_000_000 - 1) + 1);
-    const result = await createHash(currentLevel, nonce, currentDifficulty);
-    console.log(result);
-    if (result) {
-      dataToSubmit = { ...result, level: currentLevel };
-      kneading = false;
-      openModal = true;
-    } else {
-      kneading = false;
-      kneadingError = true;
-      setTimeout(() => (kneadingError = false), 3000);
-    }
+    kneader.postMessage({
+      type: "create-hash",
+      payload: {
+        level: currentLevel,
+        difficulty: currentDifficulty
+      }
+    });
   };
 
   onMount(async () => {
@@ -122,16 +149,23 @@
         userBalance = 0;
       }
 
-      const kneader = await storage.kneaders.get(userAddress);
-      if (kneader) {
-        lastKneading = kneader.last_kneading_level.toNumber();
+      const kneaderAccount = await storage.kneaders.get(userAddress);
+      if (kneaderAccount) {
+        lastKneading = kneaderAccount.last_kneading_level.toNumber();
       }
     }
     tokensReward = storage.tokens_reward.toNumber();
     rewardHalvingBlockInterval =
       storage.reward_halving.block_interval.toNumber();
-    currentDifficulty = storage.difficulty;
+    currentDifficulty = {
+      ...storage.difficulty,
+      length: storage.difficulty.length.toNumber()
+    };
     rekneadingAuthLevel = storage.reknead_auth_levels.toNumber();
+
+    kneader = new KneaderWorker();
+    kneader.postMessage({ type: "init", payload: contractAddress });
+    kneader.onmessage = handleKneader;
   });
 
   afterUpdate(async () => {
@@ -162,6 +196,14 @@
       font-size: 30px;
       color: #333;
       margin: 10px;
+    }
+
+    .kneading-actions {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: $tezos-blue;
     }
   }
 
@@ -243,32 +285,38 @@
       and a couple of minutes.
     </div>
     <br />
-    {#if userAddress}
-      {#if kneading}
-        <button class="loading">
-          Kneading... &nbsp;
-          <KneadingIcon color="#2e7df7" size="32" />
-        </button>
-      {:else if kneadingError}
-        <button>Too late, try again!</button>
-      {:else if currentLevel < lastKneading + rekneadingAuthLevel}
-        <button>
-          Wait {lastKneading + rekneadingAuthLevel - currentLevel} level{lastKneading +
-            rekneadingAuthLevel -
-            currentLevel >
-          1
-            ? "s"
-            : ""} before kneading again
-        </button>
+    <div class="kneading-actions">
+      {#if userAddress}
+        {#if kneading}
+          <button class="loading">
+            Kneading... ({hashingCountdown} s) &nbsp;
+            <KneadingIcon color="#2e7df7" size="32" />
+          </button>
+        {:else if kneadingError}
+          <button>Too late, try again!</button>
+        {:else if currentLevel < lastKneading + rekneadingAuthLevel}
+          <button>
+            Wait {lastKneading + rekneadingAuthLevel - currentLevel} level{lastKneading +
+              rekneadingAuthLevel -
+              currentLevel >
+            1
+              ? "s"
+              : ""} before kneading again
+          </button>
+        {:else}
+          <button on:click={knead}>Knead WORK tokens now</button>
+        {/if}
+        <br />
+        <label for="auto-reknead">
+          <input type="checkbox" id="auto-reknead" bind:checked={autoReknead} />
+          Auto-reknead
+        </label>
       {:else}
-        <button on:click={knead}>Knead WORK tokens now</button>
+        <button on:click={connect}>
+          Connect your wallet and start kneading some tokens!
+        </button>
       {/if}
-    {:else}
-      <button on:click={connect}>
-        Connect your wallet and start kneading some tokens!
-      </button>
-    {/if}
-    <div />
+    </div>
   </div>
 </main>
 {#if openModal && dataToSubmit && Tezos}

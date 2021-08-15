@@ -7,21 +7,20 @@ export default async (
   level: number,
   nonce: number,
   difficulty: Difficulty
-): Promise<{ hash: string; nonce: number } | null> => {
+): Promise<{ hash: string; nonce: number; level: number } | null> => {
   let hash = "";
   let success = false;
 
   console.log("Starting kneading...");
   const startTime = Date.now();
 
-  while (startTime + 180_000 > Date.now()) {
+  while (startTime + 240_000 > Date.now()) {
     const secret = level * nonce;
     const bytesSecret = packDataBytes({ int: secret.toString() });
     hash = createHash("sha256")
       .update(Buffer.from(bytesSecret.bytes, "hex"))
       .digest("hex");
     if (hash.slice(0, difficulty.length * 2) === difficulty.sub_bytes) {
-      //console.log(hash, bytes2Char(hash));
       success = true;
       break;
     }
@@ -31,7 +30,7 @@ export default async (
   console.log("Kneading over!");
 
   if (success) {
-    return { hash, nonce };
+    return { hash, nonce, level };
   } else {
     return null;
   }
